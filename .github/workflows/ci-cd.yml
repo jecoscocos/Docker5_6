@@ -16,9 +16,17 @@ jobs:
       BACKEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/todo-backend:latest
       FRONTEND_IMAGE: ${{ secrets.DOCKER_USERNAME }}/todo-frontend:latest
       DATABASE_IMAGE: ${{ secrets.DOCKER_USERNAME }}/todo-database:latest
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
     
     steps:
       - uses: actions/checkout@v3
+      
+      # Создание .env файла для бэкенда
+      - name: Создание .env файла
+        run: |
+          echo "DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@todo-db:5432/${{ secrets.DB_NAME }}" > backend/.env
       
       # Создание сети
       - name: Создание Docker сети
@@ -26,7 +34,12 @@ jobs:
       
       # Сборка образа базы данных
       - name: Сборка образа базы данных
-        run: docker build -t $DATABASE_IMAGE ./database
+        run: |
+          docker build -t $DATABASE_IMAGE \
+            --build-arg POSTGRES_USER=${{ secrets.DB_USER }} \
+            --build-arg POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }} \
+            --build-arg POSTGRES_DB=${{ secrets.DB_NAME }} \
+            ./database
       
       # Запуск контейнера базы данных
       - name: Запуск контейнера базы данных
@@ -35,6 +48,9 @@ jobs:
             --name todo-db \
             --network todo-network \
             -p 5432:5432 \
+            -e POSTGRES_USER=${{ secrets.DB_USER }} \
+            -e POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }} \
+            -e POSTGRES_DB=${{ secrets.DB_NAME }} \
             $DATABASE_IMAGE
           
           # Ждем 5 секунд, пока БД полностью запустится
@@ -51,7 +67,21 @@ jobs:
             --name todo-backend \
             --network todo-network \
             -p 8000:8000 \
-            -e DATABASE_URL=postgresql://admin:admin123@todo-db:5432/tododb \
+            -e DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@todo-db:5432/${{ secrets.DB_NAME }} \
+            -e EMAIL_HOST=${{ secrets.EMAIL_HOST }} \
+            -e EMAIL_PORT=${{ secrets.EMAIL_PORT }} \
+            -e EMAIL_USER=${{ secrets.EMAIL_USER }} \
+            -e EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }} \
+            -e EMAIL_FROM=${{ secrets.EMAIL_FROM }} \
+            -e IMAP_HOST=${{ secrets.IMAP_HOST }} \
+            -e IMAP_PORT=${{ secrets.IMAP_PORT }} \
+            -e IMAP_USER=${{ secrets.IMAP_USER }} \
+            -e IMAP_PASSWORD=${{ secrets.IMAP_PASSWORD }} \
+            -e POP3_HOST=${{ secrets.POP3_HOST }} \
+            -e POP3_PORT=${{ secrets.POP3_PORT }} \
+            -e POP3_USER=${{ secrets.POP3_USER }} \
+            -e POP3_PASSWORD=${{ secrets.POP3_PASSWORD }} \
+            -e WEBSOCKET_PORT=8000 \
             $BACKEND_IMAGE
           
           # Ждем 5 секунд, пока бэкенд полностью запустится
