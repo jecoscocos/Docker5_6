@@ -1,0 +1,121 @@
+name: Release CI/CD для Todo приложения
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Срабатывает только на теги версий типа v1.0.0
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      VERSION: ${{ github.ref_name }}  # Получаем номер версии из тега
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      # Создание сети
+      - name: Создание Docker сети
+        run: docker network create todo-network
+      
+      # Сборка образа базы данных
+      - name: Сборка образа базы данных
+        run: docker build -t $DOCKER_USERNAME/todo-database:$VERSION -t $DOCKER_USERNAME/todo-database:latest ./database
+      
+      # Запуск контейнера базы данных
+      - name: Запуск контейнера базы данных
+        run: |
+          docker run -d \
+            --name todo-db \
+            --network todo-network \
+            -p 5432:5432 \
+            $DOCKER_USERNAME/todo-database:$VERSION
+          
+          # Ждем 5 секунд, пока БД полностью запустится
+          sleep 5
+      
+      # Сборка образа бэкенда
+      - name: Сборка образа бэкенда
+        run: docker build -t $DOCKER_USERNAME/todo-backend:$VERSION -t $DOCKER_USERNAME/todo-backend:latest ./backend
+      
+      # Запуск контейнера бэкенда
+      - name: Запуск контейнера бэкенда
+        run: |
+          docker run -d \
+            --name todo-backend \
+            --network todo-network \
+            -p 8000:8000 \
+            -e DATABASE_URL=postgresql://admin:admin123@todo-db:5432/tododb \
+            $DOCKER_USERNAME/todo-backend:$VERSION
+          
+          # Ждем 5 секунд, пока бэкенд полностью запустится
+          sleep 5
+      
+      # Сборка образа фронтенда
+      - name: Сборка образа фронтенда
+        run: docker build -t $DOCKER_USERNAME/todo-frontend:$VERSION -t $DOCKER_USERNAME/todo-frontend:latest ./frontend
+      
+      # Запуск контейнера фронтенда
+      - name: Запуск контейнера фронтенда
+        run: |
+          docker run -d \
+            --name todo-frontend \
+            --network todo-network \
+            -p 3000:3000 \
+            -e REACT_APP_API_URL=http://todo-backend:8000 \
+            $DOCKER_USERNAME/todo-frontend:$VERSION
+          
+          # Ждем 10 секунд, пока фронтенд полностью запустится
+          sleep 10
+      
+      # Проверка доступности бэкенда
+      - name: Проверка доступности бэкенда
+        run: |
+          curl -s -f http://localhost:8000/api/health || exit 1
+          curl -s -f http://localhost:8000/tasks || exit 1
+          echo "Бэкенд работает корректно"
+      
+      # Проверка доступности фронтенда (обычно просто проверяем, что страница загружается)
+      - name: Проверка доступности фронтенда
+        run: |
+          curl -s -f http://localhost:3000 || exit 1
+          echo "Фронтенд работает корректно"
+      
+      # Авторизация в Docker Hub
+      - name: Авторизация в Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      # Отправка образов в Docker Hub с версией и тегом latest
+      - name: Отправка образов в Docker Hub
+        run: |
+          docker push $DOCKER_USERNAME/todo-backend:$VERSION
+          docker push $DOCKER_USERNAME/todo-backend:latest
+          docker push $DOCKER_USERNAME/todo-frontend:$VERSION
+          docker push $DOCKER_USERNAME/todo-frontend:latest
+          docker push $DOCKER_USERNAME/todo-database:$VERSION
+          docker push $DOCKER_USERNAME/todo-database:latest
+      
+      # Создание релиза в GitHub
+      - name: Создание релиза в GitHub
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+      
+      # Очистка контейнеров
+      - name: Очистка контейнеров
+        if: always()
+        run: |
+          docker stop todo-frontend todo-backend todo-db || true
+          docker rm todo-frontend todo-backend todo-db || true
+      
+      # Очистка сети
+      - name: Очистка сети
+        if: always()
+        run: docker network rm todo-network || true 
